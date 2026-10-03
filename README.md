@@ -67,3 +67,13 @@ bb plugin install .
 The tests build T3 and bb databases from `test/fixtures/*-schema.sql`, which are the table definitions of T3 Code and
 bb 0.45. `scripts/check-events.mjs <bb.db>` parses imported events with the installed bb server's own event parser;
 run it against a copy of `bb.db` after an import rehearsal or a bb update.
+
+## Install
+
+```
+bb plugin install git:https://github.com/iipanda/bb-plugin-t3-import.git
+```
+
+## License
+
+MIT

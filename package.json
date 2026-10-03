@@ -2,6 +2,11 @@
   "name": "bb-plugin-t3-import",
   "version": "0.1.0",
   "description": "Import T3 Code projects and threads into bb, keeping Claude Code sessions resumable.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iipanda/bb-plugin-t3-import.git"
+  },
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
