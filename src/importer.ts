@@ -15,6 +15,8 @@ export interface ImportFilters {
   /** T3 thread IDs. */
   threads: string[];
   includeSettled: boolean;
+  /** Import settled threads as archived bb threads. */
+  archiveSettled: boolean;
   includeArchived: boolean;
   limit: number | null;
 }
@@ -58,6 +60,8 @@ export interface PlannedThread {
   reason: string | null;
   providerId: "claude-code" | "codex";
   environmentPath: string;
+  /** Archive time for the bb thread: T3's archive time, or its settle time with archiveSettled. */
+  archivedAtMs: number | null;
   bbProject: { id: string | null; name: string };
   session: SessionPlan;
   warnings: string[];
@@ -99,9 +103,9 @@ export async function planImport(deps: ImporterDeps, filters: ImportFilters, ses
     for (const thread of t3.threads()) {
       if (threadFilter.size > 0 && !threadFilter.has(thread.id)) { skipBy("not selected"); continue; }
       if (projectFilter.length > 0 && !projectFilter.some((value) => matchesProject(thread, value))) { skipBy("other project"); continue; }
-      if (thread.settled && !filters.includeSettled && !threadFilter.has(thread.id)) { skipBy("settled"); continue; }
+      if (thread.settled && !filters.includeSettled && !filters.archiveSettled && !threadFilter.has(thread.id)) { skipBy("settled"); continue; }
       if (thread.archivedAtMs !== null && !filters.includeArchived && !threadFilter.has(thread.id)) { skipBy("archived"); continue; }
-      planned.push(await planThread(deps, bb, projects, thread, sessionMode));
+      planned.push(await planThread(deps, bb, projects, thread, sessionMode, filters.archiveSettled));
     }
 
     const limited = filters.limit === null ? planned : limit(planned, filters.limit, skipBy);
@@ -122,14 +126,15 @@ function limit(planned: PlannedThread[], max: number, skipBy: (reason: string) =
   });
 }
 
-async function planThread(deps: ImporterDeps, bb: BbStore, projects: BbProjectRef[], thread: T3Thread, sessionMode: SessionMode): Promise<PlannedThread> {
+async function planThread(deps: ImporterDeps, bb: BbStore, projects: BbProjectRef[], thread: T3Thread, sessionMode: SessionMode, archiveSettled: boolean): Promise<PlannedThread> {
   const root = resolve(thread.workspaceRoot);
   const environmentPath = thread.worktreePath && existsSync(thread.worktreePath) ? resolve(thread.worktreePath) : root;
   const project = projects.find((candidate) => candidate.sources.some((source) => source.hostId === deps.hostId && resolve(source.path) === root));
   const providerId = thread.provider === "codex" ? "codex" : "claude-code";
   const warnings: string[] = [];
+  const archivedAtMs = thread.archivedAtMs ?? (archiveSettled && thread.settled ? thread.settledAtMs : null);
   const base = {
-    t3: thread, providerId, environmentPath, warnings,
+    t3: thread, providerId, environmentPath, archivedAtMs, warnings,
     bbProject: { id: project?.id ?? null, name: project?.name ?? basename(root) },
   } as const;
 
@@ -211,7 +216,7 @@ export async function runImport(deps: ImporterDeps, plan: ImportPlan): Promise<R
           title: planned.t3.title,
           createdAtMs: planned.t3.createdAtMs,
           updatedAtMs: planned.t3.updatedAtMs,
-          archivedAtMs: planned.t3.archivedAtMs,
+          archivedAtMs: planned.archivedAtMs,
           history,
         });
         await deps.ledger.set(planned.t3.id, {

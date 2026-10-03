@@ -22,6 +22,8 @@ export interface T3Thread {
   updatedAtMs: number;
   archivedAtMs: number | null;
   settled: boolean;
+  /** When T3 marked the thread settled; null when it is not settled. */
+  settledAtMs: number | null;
   provider: T3Provider | null;
   /** Claude Code session ID, or Codex thread ID, that T3 resumes. */
   sessionId: string | null;
@@ -232,6 +234,7 @@ function toThread(row: ThreadRow): T3Thread {
   const provider = providerOf(row.session_provider) ?? providerOf(row.runtime_provider) ?? providerOf(string(selection.instanceId) ?? null);
   const options = Array.isArray(selection.options) ? selection.options.map(record) : [];
   const effort = options.find((option) => option.id === "effort" || option.id === "reasoningEffort");
+  const settled = isSettled({ settledOverride: row.settled_override, settledAt: row.settled_at, unsettledAt: row.unsettled_at });
   return {
     id: row.thread_id,
     projectId: row.project_id,
@@ -242,7 +245,8 @@ function toThread(row: ThreadRow): T3Thread {
     createdAtMs: ms(row.created_at),
     updatedAtMs: ms(row.updated_at),
     archivedAtMs: row.archived_at === null ? null : ms(row.archived_at),
-    settled: isSettled({ settledOverride: row.settled_override, settledAt: row.settled_at, unsettledAt: row.unsettled_at }),
+    settled,
+    settledAtMs: settled ? (row.settled_at === null ? ms(row.updated_at) : ms(row.settled_at)) : null,
     provider,
     sessionId: provider === "codex" ? string(cursor.threadId) ?? null : string(cursor.resume) ?? null,
     model: string(selection.model) ?? null,

@@ -26,7 +26,12 @@ const selectionOptions = {
     aliases: ["threads"],
     description: "T3 thread ID to import; a selected thread is imported even when settled or archived",
   },
-  "include-settled": { type: "boolean", description: "Also import threads marked settled in T3 Code" },
+  "include-settled": { type: "boolean", description: "Also import threads marked settled in T3 Code, as open bb threads" },
+  "archive-settled": {
+    type: "boolean",
+    aliases: ["settled-as-archived"],
+    description: "Also import settled threads, archived in bb at the time T3 settled them (takes precedence over --include-settled)",
+  },
   "exclude-archived": { type: "boolean", description: "Leave out threads archived in T3 Code" },
   limit: { type: "integer", min: 1, max: 10_000, description: "Import at most this many threads" },
   session: {
@@ -80,12 +85,13 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   function filtersOf(options: {
-    project?: string[]; thread?: string[]; "include-settled"?: boolean; "exclude-archived"?: boolean; limit?: number;
+    project?: string[]; thread?: string[]; "include-settled"?: boolean; "archive-settled"?: boolean; "exclude-archived"?: boolean; limit?: number;
   }): ImportFilters {
     return {
       projects: options.project ?? [],
       threads: options.thread ?? [],
       includeSettled: options["include-settled"] === true,
+      archiveSettled: options["archive-settled"] === true,
       includeArchived: options["exclude-archived"] !== true,
       limit: options.limit ?? null,
     };
@@ -176,7 +182,7 @@ function planJson(plan: ImportPlan, mode: SessionMode) {
       session: thread.session.kind === "copy"
         ? { kind: "copy", sourceSessionId: thread.session.sourceSessionId }
         : thread.session,
-      archived: thread.t3.archivedAtMs !== null,
+      archived: thread.archivedAtMs !== null,
       settled: thread.t3.settled,
       warnings: thread.warnings,
     })),
@@ -187,7 +193,7 @@ function runJson(result: RunResult) {
   return { imported: result.imported, failed: result.failed, backupPath: result.backupPath };
 }
 
-function formatPlan(plan: ImportPlan, mode: SessionMode, options: { "include-settled"?: boolean }): string {
+function formatPlan(plan: ImportPlan, mode: SessionMode, options: { "include-settled"?: boolean; "archive-settled"?: boolean }): string {
   const lines: string[] = [];
   const byProject = new Map<string, PlannedThread[]>();
   for (const thread of plan.threads) {
@@ -199,7 +205,10 @@ function formatPlan(plan: ImportPlan, mode: SessionMode, options: { "include-set
     const project = threads[0]!.bbProject;
     lines.push(`${root} → bb project "${project.name}" (${project.id ?? "will be created"})`);
     for (const thread of threads) {
-      const flags = [thread.t3.archivedAtMs !== null ? "archived" : null, thread.t3.settled ? "settled" : null].filter(Boolean).join(", ");
+      const flags = [
+        thread.t3.archivedAtMs !== null ? "archived" : null,
+        thread.t3.settled ? (thread.action === "import" && thread.t3.archivedAtMs === null && thread.archivedAtMs !== null ? "settled → archived in bb" : "settled") : null,
+      ].filter(Boolean).join(", ");
       const label = `${thread.t3.title}${flags ? ` (${flags})` : ""}`;
       if (thread.action === "skip") {
         lines.push(`  skip    ${label} — ${thread.reason}`);
@@ -214,7 +223,9 @@ function formatPlan(plan: ImportPlan, mode: SessionMode, options: { "include-set
   if (lines.length === 0) lines.push("No T3 Code threads match.");
   lines.push("");
   lines.push(`${importing} thread${importing === 1 ? "" : "s"} to import (session: ${mode}).${filtered ? ` Left out: ${filtered}.` : ""}`);
-  if (!options["include-settled"] && plan.filtered.settled) lines.push("Add --include-settled to import settled threads too.");
+  if (!options["include-settled"] && !options["archive-settled"] && plan.filtered.settled) {
+    lines.push("Add --archive-settled to import settled threads as archived, or --include-settled to import them open.");
+  }
   if (importing > 0) lines.push("Nothing was written. Run the same command as `bb t3-import run ... --yes` to import.");
   return lines.join("\n");
 }

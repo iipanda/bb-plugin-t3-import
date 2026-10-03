@@ -7,7 +7,7 @@ import { projectSlug } from "../src/claude-session.ts";
 import { planImport, runImport, type ImportFilters } from "../src/importer.ts";
 import { claudeSession, fixture, HOST_ID, message, seedThread, type Fixture } from "./helpers.ts";
 
-const defaults: ImportFilters = { projects: [], threads: [], includeSettled: false, includeArchived: true, limit: null };
+const defaults: ImportFilters = { projects: [], threads: [], includeSettled: false, archiveSettled: false, includeArchived: true, limit: null };
 
 function seedThree(f: Fixture) {
   seedThread(f, { id: "open" , title: "Open work" });
@@ -157,4 +157,35 @@ test("a failed thread write removes its session copy and leaves bb unchanged", a
   const db = new Database(f.bbPath, { readonly: true });
   assert.equal((db.prepare("SELECT count(*) AS n FROM threads").get() as { n: number }).n, 0);
   db.close();
+});
+
+test("--archive-settled imports settled threads archived at their settle time", async () => {
+  const f = fixture();
+  seedThree(f);
+  const plan = await planImport(f.deps, { ...defaults, archiveSettled: true }, "copy");
+  assert.deepEqual(plan.threads.map((thread) => thread.t3.id).sort(), ["done", "old", "open"]);
+  assert.deepEqual(plan.filtered, {});
+  const byId = new Map(plan.threads.map((thread) => [thread.t3.id, thread]));
+  assert.equal(byId.get("done")!.archivedAtMs, Date.parse("2026-09-21T11:00:00.000Z"), "settle time becomes the archive time");
+  assert.equal(byId.get("old")!.archivedAtMs, Date.parse("2026-09-22T00:00:00.000Z"), "T3 archive time wins");
+  assert.equal(byId.get("open")!.archivedAtMs, null);
+
+  const result = await runImport(f.deps, plan);
+  assert.deepEqual(result.failed, []);
+  const db = new Database(f.bbPath, { readonly: true });
+  const archived = (id: string) => (db.prepare("SELECT archived_at FROM threads WHERE id = ?")
+    .get(result.imported.find((thread) => thread.t3ThreadId === id)!.bbThreadId) as { archived_at: number | null }).archived_at;
+  assert.equal(archived("done"), Date.parse("2026-09-21T11:00:00.000Z"));
+  assert.equal(archived("open"), null);
+  db.close();
+
+  const included = await planImport(f.deps, { ...defaults, includeSettled: true, threads: ["done"] }, "copy");
+  assert.equal(included.threads[0]!.action, "skip", "already imported");
+});
+
+test("--include-settled imports settled threads open", async () => {
+  const f = fixture();
+  seedThree(f);
+  const plan = await planImport(f.deps, { ...defaults, includeSettled: true, threads: ["done"] }, "copy");
+  assert.equal(plan.threads[0]!.archivedAtMs, null);
 });
