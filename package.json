@@ -1,7 +1,7 @@
 {
   "name": "bb-plugin-t3-import",
   "version": "0.1.0",
-  "description": "Import T3 Code projects and threads into bb, keeping Claude Code sessions resumable.",
+  "description": "Import T3 Code threads into bb and pick up each conversation where you left off.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -20,7 +20,7 @@
   },
   "bb": {
     "name": "T3 Import",
-    "description": "Preview and import T3 Code threads into bb projects, with resumable Claude Code sessions.",
+    "description": "Import T3 Code threads into bb projects and pick up each conversation where you left off.",
     "branding": {
       "icon": "Import"
     },

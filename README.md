@@ -1,8 +1,8 @@
 # bb-plugin-t3-import
 
 A [bb](https://getbb.app) plugin that imports [T3 Code](https://t3.codes) threads into bb. Imported threads keep their
-conversation, tool calls, and dates, and a follow-up message in bb resumes the original Claude Code or Codex session
-with its full context.
+conversation, tool calls, and dates, and a follow-up message in bb continues the conversation with the agent's full
+context, for both Claude Code and Codex threads.
 
 ```
 bb t3-import preview                 # read-only: what would be imported
