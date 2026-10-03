@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-t3-import",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Import T3 Code threads into bb and pick up each conversation where you left off.",
   "license": "MIT",
   "repository": {
