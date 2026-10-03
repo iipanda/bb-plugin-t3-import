@@ -14,7 +14,8 @@ session on the next message.
 3. Import only after the user approves: `bb t3-import run --yes` with the same selection options.
 4. Report the imported bb thread IDs and the backup path from the output. `bb t3-import status` lists every import.
 
-Options: `--project`, `--thread`, `--include-settled`, `--exclude-archived`, `--limit <n>`,
+Options: `--project`, `--thread`, `--include-settled`, `--archive-settled` (import settled threads archived),
+`--empty-projects` (also create bb projects for T3 projects with no thread to import), `--exclude-archived`, `--limit <n>`,
 `--session copy|share` (default `copy`: bb resumes a copy of each Claude session and T3 stays untouched), `--json`.
 
 The command runs on the bb server's machine and reads `~/.t3/userdata/state.sqlite` and `~/.claude` there. It writes

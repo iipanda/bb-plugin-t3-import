@@ -33,6 +33,11 @@ const selectionOptions = {
     description: "Also import settled threads, archived in bb at the time T3 settled them (takes precedence over --include-settled)",
   },
   "exclude-archived": { type: "boolean", description: "Leave out threads archived in T3 Code" },
+  "empty-projects": {
+    type: "boolean",
+    aliases: ["include-empty-projects", "projects-without-threads"],
+    description: "Also create bb projects for selected T3 projects that have no thread to import (ignored with --thread)",
+  },
   limit: { type: "integer", min: 1, max: 10_000, description: "Import at most this many threads" },
   session: {
     type: "enum",
@@ -85,7 +90,7 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   function filtersOf(options: {
-    project?: string[]; thread?: string[]; "include-settled"?: boolean; "archive-settled"?: boolean; "exclude-archived"?: boolean; limit?: number;
+    project?: string[]; thread?: string[]; "include-settled"?: boolean; "archive-settled"?: boolean; "exclude-archived"?: boolean; "empty-projects"?: boolean; limit?: number;
   }): ImportFilters {
     return {
       projects: options.project ?? [],
@@ -94,6 +99,7 @@ export default async function plugin(bb: BbPluginApi) {
       archiveSettled: options["archive-settled"] === true,
       includeArchived: options["exclude-archived"] !== true,
       limit: options.limit ?? null,
+      emptyProjects: options["empty-projects"] === true,
     };
   }
 
@@ -138,7 +144,7 @@ export default async function plugin(bb: BbPluginApi) {
             };
           }
           const outcome = await runImport(resolved, result);
-          return { exitCode: outcome.failed.length > 0 ? 1 : 0, stdout: options.json ? JSON.stringify(runJson(outcome)) : formatRun(outcome) };
+          return { exitCode: outcome.failed.length + outcome.failedProjects.length > 0 ? 1 : 0, stdout: options.json ? JSON.stringify(runJson(outcome)) : formatRun(outcome) };
         },
       }),
       status: cliCommand({
@@ -170,6 +176,7 @@ function planJson(plan: ImportPlan, mode: SessionMode) {
   return {
     sessionMode: mode,
     filtered: plan.filtered,
+    projects: plan.projects,
     threads: plan.threads.map((thread) => ({
       t3ThreadId: thread.t3.id,
       title: thread.t3.title,
@@ -190,7 +197,10 @@ function planJson(plan: ImportPlan, mode: SessionMode) {
 }
 
 function runJson(result: RunResult) {
-  return { imported: result.imported, failed: result.failed, backupPath: result.backupPath };
+  return {
+    imported: result.imported, failed: result.failed, backupPath: result.backupPath,
+    createdProjects: result.createdProjects, failedProjects: result.failedProjects,
+  };
 }
 
 function formatPlan(plan: ImportPlan, mode: SessionMode, options: { "include-settled"?: boolean; "archive-settled"?: boolean }): string {
@@ -218,15 +228,23 @@ function formatPlan(plan: ImportPlan, mode: SessionMode, options: { "include-set
       for (const warning of thread.warnings) lines.push(`          ! ${warning}`);
     }
   }
+  for (const project of plan.projects) {
+    lines.push(project.action === "create"
+      ? `${project.workspaceRoot} → bb project "${project.name}" (will be created, no threads to import)`
+      : `${project.workspaceRoot} → skip project — ${project.reason}`);
+  }
   const importing = plan.threads.filter((thread) => thread.action === "import").length;
+  const creating = plan.projects.filter((project) => project.action === "create").length;
   const filtered = Object.entries(plan.filtered).map(([reason, count]) => `${count} ${reason}`).join(", ");
   if (lines.length === 0) lines.push("No T3 Code threads match.");
   lines.push("");
-  lines.push(`${importing} thread${importing === 1 ? "" : "s"} to import (session: ${mode}).${filtered ? ` Left out: ${filtered}.` : ""}`);
+  lines.push(`${importing} thread${importing === 1 ? "" : "s"} to import (session: ${mode})`
+    + `${creating > 0 ? `, ${creating} project${creating === 1 ? "" : "s"} without threads to create` : ""}.`
+    + `${filtered ? ` Left out: ${filtered}.` : ""}`);
   if (!options["include-settled"] && !options["archive-settled"] && plan.filtered.settled) {
     lines.push("Add --archive-settled to import settled threads as archived, or --include-settled to import them open.");
   }
-  if (importing > 0) lines.push("Nothing was written. Run the same command as `bb t3-import run ... --yes` to import.");
+  if (importing + creating > 0) lines.push("Nothing was written. Run the same command as `bb t3-import run ... --yes` to import.");
   return lines.join("\n");
 }
 
@@ -240,12 +258,19 @@ function sessionLabel(thread: PlannedThread): string {
 
 function formatRun(result: RunResult): string {
   const lines: string[] = [];
+  for (const project of result.createdProjects) lines.push(`created   project "${project.name}" → ${project.bbProjectId} (${project.workspaceRoot})`);
+  for (const failure of result.failedProjects) lines.push(`FAILED    project "${failure.name}" (${failure.workspaceRoot}): ${failure.error}`);
   if (result.backupPath) lines.push(`Backed up bb.db to ${result.backupPath}`);
   for (const thread of result.imported) {
     lines.push(`imported  ${thread.title} → ${thread.bbThreadId} (${thread.events} events${thread.sessionId ? `, session ${thread.sessionId}` : ""})`);
   }
   for (const failure of result.failed) lines.push(`FAILED    ${failure.title} (${failure.t3ThreadId}): ${failure.error}`);
   if (lines.length === 0) lines.push("Nothing to import.");
-  else lines.push("", `${result.imported.length} imported, ${result.failed.length} failed. Reload the bb app if the threads do not appear.`);
+  else {
+    const projects = result.createdProjects.length + result.failedProjects.length > 0
+      ? `; ${result.createdProjects.length} project${result.createdProjects.length === 1 ? "" : "s"} created, ${result.failedProjects.length} failed`
+      : "";
+    lines.push("", `${result.imported.length} imported, ${result.failed.length} failed${projects}. Reload the bb app if the threads do not appear.`);
+  }
   return lines.join("\n");
 }

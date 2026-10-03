@@ -32,7 +32,9 @@ the import again skips threads that are already in bb.
 | --- | --- |
 | `--project <name or path>` | Only these T3 projects (title, folder name, or absolute path). Repeat or comma-separate. |
 | `--thread <id>` | Only these T3 thread IDs. A selected thread is imported even when settled or archived. |
-| `--include-settled` | Also import threads marked settled in T3 (left out by default). |
+| `--include-settled` | Also import threads marked settled in T3, as open bb threads (left out by default). |
+| `--archive-settled` | Also import settled threads, archived in bb at the time T3 settled them. |
+| `--empty-projects` | Also create bb projects for selected T3 projects that have no thread to import. |
 | `--exclude-archived` | Leave out threads archived in T3 (they are imported as archived by default). |
 | `--limit <n>` | Import at most `n` threads; useful for a first test. |
 | `--session copy\|share` | How Claude Code sessions are resumed (default `copy`). |

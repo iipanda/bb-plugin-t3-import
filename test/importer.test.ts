@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import Database from "better-sqlite3";
@@ -7,7 +7,7 @@ import { projectSlug } from "../src/claude-session.ts";
 import { planImport, runImport, type ImportFilters } from "../src/importer.ts";
 import { claudeSession, fixture, HOST_ID, message, seedThread, type Fixture } from "./helpers.ts";
 
-const defaults: ImportFilters = { projects: [], threads: [], includeSettled: false, archiveSettled: false, includeArchived: true, limit: null };
+const defaults: ImportFilters = { projects: [], threads: [], includeSettled: false, archiveSettled: false, includeArchived: true, limit: null, emptyProjects: false };
 
 function seedThree(f: Fixture) {
   seedThread(f, { id: "open" , title: "Open work" });
@@ -188,4 +188,37 @@ test("--include-settled imports settled threads open", async () => {
   seedThree(f);
   const plan = await planImport(f.deps, { ...defaults, includeSettled: true, threads: ["done"] }, "copy");
   assert.equal(plan.threads[0]!.archivedAtMs, null);
+});
+
+test("--empty-projects creates bb projects for T3 projects with nothing to import", async () => {
+  const f = fixture();
+  seedThread(f, { id: "settled-only", settled: true });
+  const quiet = join(f.dir, "quiet");
+  mkdirSync(quiet);
+  f.t3.prepare(`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at)
+    VALUES ('p2', 'quiet', ?, '[]', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`).run(quiet);
+  f.t3.prepare(`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at)
+    VALUES ('p3', 'gone', ?, '[]', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`).run(join(f.dir, "gone"));
+
+  const without = await planImport(f.deps, defaults, "copy");
+  assert.deepEqual(without.projects, [], "off by default");
+
+  const plan = await planImport(f.deps, { ...defaults, emptyProjects: true }, "copy");
+  assert.deepEqual(plan.threads, []);
+  assert.deepEqual(plan.projects.map((project) => [project.t3ProjectTitle, project.action]).sort(), [["gone", "skip"], ["quiet", "create"], ["repo", "create"]]);
+  assert.deepEqual((await planImport(f.deps, { ...defaults, emptyProjects: true, projects: ["quiet"] }, "copy")).projects.map((project) => project.t3ProjectTitle), ["quiet"]);
+  assert.deepEqual((await planImport(f.deps, { ...defaults, emptyProjects: true, threads: ["settled-only"] }, "copy")).projects, [], "--thread selects threads only");
+
+  const result = await runImport(f.deps, plan);
+  assert.deepEqual(result.failedProjects, []);
+  assert.deepEqual(result.createdProjects.map((project) => project.workspaceRoot).sort(), [f.repo, quiet].sort());
+  assert.equal(result.backupPath, null, "creating projects through bb needs no backup");
+  assert.deepEqual((await planImport(f.deps, { ...defaults, emptyProjects: true }, "copy")).projects.map((project) => project.action), ["skip"], "existing bb projects are not listed again");
+});
+
+test("--empty-projects leaves out projects that get threads", async () => {
+  const f = fixture();
+  seedThree(f);
+  const plan = await planImport(f.deps, { ...defaults, emptyProjects: true }, "copy");
+  assert.deepEqual(plan.projects, []);
 });

@@ -19,6 +19,8 @@ export interface ImportFilters {
   archiveSettled: boolean;
   includeArchived: boolean;
   limit: number | null;
+  /** Also create bb projects for selected T3 projects that have no thread to import. */
+  emptyProjects: boolean;
 }
 
 export interface LedgerEntry {
@@ -67,8 +69,19 @@ export interface PlannedThread {
   warnings: string[];
 }
 
+/** A T3 project that gets a bb project although none of its threads is imported. */
+export interface PlannedProject {
+  t3ProjectTitle: string;
+  workspaceRoot: string;
+  name: string;
+  action: "create" | "skip";
+  reason: string | null;
+}
+
 export interface ImportPlan {
   threads: PlannedThread[];
+  /** Filled only with the emptyProjects filter. */
+  projects: PlannedProject[];
   /** T3 threads left out by the filters, by reason. */
   filtered: Record<string, number>;
 }
@@ -87,6 +100,8 @@ export interface RunResult {
   imported: ImportedThread[];
   failed: { t3ThreadId: string; title: string; error: string }[];
   backupPath: string | null;
+  createdProjects: { name: string; workspaceRoot: string; bbProjectId: string }[];
+  failedProjects: { name: string; workspaceRoot: string; error: string }[];
 }
 
 export async function planImport(deps: ImporterDeps, filters: ImportFilters, sessionMode: SessionMode): Promise<ImportPlan> {
@@ -102,14 +117,32 @@ export async function planImport(deps: ImporterDeps, filters: ImportFilters, ses
 
     for (const thread of t3.threads()) {
       if (threadFilter.size > 0 && !threadFilter.has(thread.id)) { skipBy("not selected"); continue; }
-      if (projectFilter.length > 0 && !projectFilter.some((value) => matchesProject(thread, value))) { skipBy("other project"); continue; }
+      if (projectFilter.length > 0 && !projectFilter.some((value) => matchesProject(thread.projectTitle, thread.workspaceRoot, value))) { skipBy("other project"); continue; }
       if (thread.settled && !filters.includeSettled && !filters.archiveSettled && !threadFilter.has(thread.id)) { skipBy("settled"); continue; }
       if (thread.archivedAtMs !== null && !filters.includeArchived && !threadFilter.has(thread.id)) { skipBy("archived"); continue; }
       planned.push(await planThread(deps, bb, projects, thread, sessionMode, filters.archiveSettled));
     }
 
     const limited = filters.limit === null ? planned : limit(planned, filters.limit, skipBy);
-    return { threads: limited, filtered };
+
+    // With --thread the selection is explicit, so no project-only rows are added.
+    const projectsOnly: PlannedProject[] = [];
+    if (filters.emptyProjects && threadFilter.size === 0) {
+      const covered = new Set(limited.filter((thread) => thread.action === "import").map((thread) => resolve(thread.t3.workspaceRoot)));
+      for (const project of t3.projects()) {
+        const root = resolve(project.workspaceRoot);
+        if (covered.has(root)) continue;
+        if (projectFilter.length > 0 && !projectFilter.some((value) => matchesProject(project.title, root, value))) continue;
+        if (projects.some((candidate) => candidate.sources.some((source) => source.hostId === deps.hostId && resolve(source.path) === root))) continue;
+        if (projectsOnly.some((planned) => planned.workspaceRoot === root)) continue;
+        const exists = existsSync(root);
+        projectsOnly.push({
+          t3ProjectTitle: project.title, workspaceRoot: root, name: basename(root),
+          action: exists ? "create" : "skip", reason: exists ? null : `project folder is missing: ${root}`,
+        });
+      }
+    }
+    return { threads: limited, projects: projectsOnly, filtered };
   } finally {
     t3.close();
     bb.close();
@@ -173,7 +206,19 @@ async function planSession(deps: ImporterDeps, bb: BbStore, thread: T3Thread, en
 }
 
 export async function runImport(deps: ImporterDeps, plan: ImportPlan): Promise<RunResult> {
-  const result: RunResult = { plan, imported: [], failed: [], backupPath: null };
+  const result: RunResult = { plan, imported: [], failed: [], backupPath: null, createdProjects: [], failedProjects: [] };
+  // Projects go through bb's own API, so they need no database backup.
+  for (const project of plan.projects.filter((candidate) => candidate.action === "create")) {
+    try {
+      const existing = (await deps.listProjects()).find((candidate) =>
+        candidate.sources.some((source) => source.hostId === deps.hostId && resolve(source.path) === project.workspaceRoot));
+      if (existing) continue;
+      const created = await deps.createProject(project.name, project.workspaceRoot);
+      result.createdProjects.push({ name: created.name, workspaceRoot: project.workspaceRoot, bbProjectId: created.id });
+    } catch (error) {
+      result.failedProjects.push({ name: project.name, workspaceRoot: project.workspaceRoot, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   const todo = plan.threads.filter((thread) => thread.action === "import");
   if (todo.length === 0) return result;
 
@@ -240,8 +285,8 @@ export async function runImport(deps: ImporterDeps, plan: ImportPlan): Promise<R
   }
 }
 
-function matchesProject(thread: T3Thread, value: string): boolean {
-  if (value.startsWith("/") || value.startsWith("~")) return resolve(value.replace(/^~(?=\/|$)/, process.env.HOME ?? "~")) === resolve(thread.workspaceRoot);
+function matchesProject(title: string, workspaceRoot: string, value: string): boolean {
+  if (value.startsWith("/") || value.startsWith("~")) return resolve(value.replace(/^~(?=\/|$)/, process.env.HOME ?? "~")) === resolve(workspaceRoot);
   const needle = value.toLowerCase();
-  return thread.projectTitle.toLowerCase() === needle || basename(thread.workspaceRoot).toLowerCase() === needle;
+  return title.toLowerCase() === needle || basename(workspaceRoot).toLowerCase() === needle;
 }
