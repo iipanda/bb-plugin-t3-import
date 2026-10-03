@@ -1,0 +1,36 @@
+{
+  "name": "bb-plugin-t3-import",
+  "version": "0.1.0",
+  "description": "Import T3 Code projects and threads into bb, keeping Claude Code sessions resumable.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "build": "bb plugin build",
+    "check-events": "node scripts/check-events.mjs"
+  },
+  "engines": {
+    "bb": ">=0.45 <0.46",
+    "bbPluginSdk": ">=0.6.15"
+  },
+  "bb": {
+    "name": "T3 Import",
+    "description": "Preview and import T3 Code threads into bb projects, with resumable Claude Code sessions.",
+    "branding": {
+      "icon": "Import"
+    },
+    "server": "./server.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.6.15",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.3.0",
+    "better-sqlite3": "^12.0.0",
+    "hono": "^4.13.12",
+    "typescript": "^5.7.0"
+  }
+}
